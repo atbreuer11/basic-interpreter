@@ -1,5 +1,5 @@
 /**
- * An error representing an illegal character.
+ * An error for an illegal character
  * @extends Error
  */
 class IllegalCharError extends Error {
@@ -11,6 +11,21 @@ class IllegalCharError extends Error {
    */
   constructor(char, fileName, lineNumber) {
     super(`'${char}' is an illegal character`, fileName, lineNumber);
+  }
+}
+
+/**
+ * An error for invalid syntax
+ */
+class InvalidSyntaxError extends Error {
+  /**
+   * Construct an error.
+   * @param {String} syntax - The illegal syntax
+   * @param {String} fileName - The file name
+   * @param {Number} lineNumber - The line number
+   */
+  constructor(syntax, fileName, lineNumber) {
+    super(`'${syntax}' invalid syntax`, fileName, lineNumber);
   }
 }
 
@@ -186,6 +201,103 @@ class NumberNode {
 }
 
 /**
+ * A node representing a binary operation
+ */
+class BinaryOperationNode {
+  /**
+   *
+   * @param {NumberNode} leftNode - The left node
+   * @param {NumberNode} rightNode - The right node
+   * @param {Token} operatorToken - A binary operator token of type TT_ADD,
+   *    TT_SUBTRACT, TT_MULTIPLY, or TT_DIVIDE
+   */
+  constructor(leftNode, rightNode, operatorToken) {
+    this.leftNode = leftNode;
+    this.rightNode = rightNode;
+    this.operatorToken = operatorToken;
+  }
+}
+
+/**
+ * A parser that can generate an abstract syntax tree from a list of tokens
+ */
+class Parser {
+  /**
+   *
+   * @param {Token[]} tokens A list of tokens
+   */
+  constructor(tokens) {
+    this.tokens = tokens;
+    this.tokenIndex = 0;
+    this.currentToken = tokens[0];
+  }
+
+  /**
+   * Advance the position, setting the current char to null when the end of
+   * the input is reached.
+   */
+  advance() {
+    this.tokenIndex++;
+    if (this.tokenIndex < this.tokens.length)
+      this.currentToken = this.tokens[this.tokenIndex];
+  }
+
+  /**
+   * Parse the expression
+   */
+  parse() {
+    const result = this.expression();
+    return result;
+  }
+
+  /**
+   * If the current token is a number, advance and return a number node
+   * @returns {NumberNode|null} - The number node or null
+   */
+  factor() {
+    if ([TT_INT, TT_FLOAT].includes(this.currentToken.type)) {
+      const token = this.currentToken;
+      this.advance();
+      return new NumberNode(token);
+    }
+  }
+
+  /**
+   * Generate a term
+   * @returns {NumberNode|BinaryOperationNode} - The term
+   */
+  term() {
+    return this.binaryOperation(true, [TT_MULTIPLY, TT_DIVIDE]);
+  }
+
+  /**
+   * Generate an expression
+   * @returns {NumberNode|BinaryOperationNode} - The expression
+   */
+  expression() {
+    return this.binaryOperation(false, [TT_ADD, TT_SUBTRACT]);
+  }
+
+  /**
+   * Recursively build expression from terms and factors
+   * @param {Boolean} shouldFactor - Whether to use factor or term for left node
+   * @param {String[]} operatorTypes - Allowed operator types for the operation
+   */
+  binaryOperation(shouldFactor, operatorTypes) {
+    let left = shouldFactor ? this.factor() : this.term();
+
+    while (operatorTypes.includes(this.currentToken.type)) {
+      const operatorNode = this.currentToken;
+      this.advance();
+      const right = shouldFactor ? this.factor() : this.term();
+      left = new BinaryOperationNode(left, right, operatorNode);
+    }
+
+    return left;
+  }
+}
+
+/**
  * Run the lexer on the input. Returns an array that can be destructured.
  * @throws
  * @param {String} input - An input
@@ -194,7 +306,13 @@ class NumberNode {
  * @returns {Error} - An error
  */
 exports.run = (input, fileName) => {
+  // Generate the tokens
   const lexer = new Lexer(fileName, input);
   const tokens = lexer.makeTokens();
-  return tokens;
+
+  // Generate abstract syntax tree
+  const parser = new Parser(tokens);
+  const ast = parser.parse();
+
+  return ast;
 };
