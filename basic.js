@@ -49,7 +49,7 @@ class Position {
    * Advance through the input storing the current index, column, and line number.
    * @param {String} currentChar - The current character to check for newlines
    */
-  advance(currentChar) {
+  advance(currentChar = null) {
     this.index++;
     this.column++;
 
@@ -71,6 +71,7 @@ const TT_MULTIPLY = 'MULTIPLY';
 const TT_DIVIDE = 'DIVIDE';
 const TT_LPAREN = 'LPARAEN';
 const TT_RPAREN = 'RPARAEN';
+const TT_EOF = 'TT_EOF';
 
 /**
  * A token with a type an a potential value.
@@ -80,10 +81,12 @@ class Token {
    * Construct a token.
    * @param {String} type - A type of token prefixed by TT_
    * @param {Number|null} value - A potential value for the token
+   * @param {Position} position - The position of the token
    */
-  constructor(type, value = null) {
+  constructor(type, value = null, position = null) {
     this.type = type;
     this.value = value;
+    this.position = position;
   }
 }
 
@@ -130,22 +133,22 @@ class Lexer {
       else if (Lexer.digits.includes(this.currentChar)) {
         tokens.push(this.makeNumber());
       } else if (this.currentChar == '+') {
-        tokens.push(new Token(TT_ADD));
+        tokens.push(new Token(TT_ADD, null, this.position));
         this.advance();
       } else if (this.currentChar == '-') {
-        tokens.push(new Token(TT_SUBTRACT));
+        tokens.push(new Token(TT_SUBTRACT, null, this.position));
         this.advance();
       } else if (this.currentChar == '*') {
-        tokens.push(new Token(TT_MULTIPLY));
+        tokens.push(new Token(TT_MULTIPLY, null, this.position));
         this.advance();
       } else if (this.currentChar == '/') {
-        tokens.push(new Token(TT_DIVIDE));
+        tokens.push(new Token(TT_DIVIDE, null, this.position));
         this.advance();
       } else if (this.currentChar == '(') {
-        tokens.push(new Token(TT_LPAREN));
+        tokens.push(new Token(TT_LPAREN, null, this.position));
         this.advance();
-      } else if (this.currentChar == '+)') {
-        tokens.push(new Token(TT_RPAREN));
+      } else if (this.currentChar == ')') {
+        tokens.push(new Token(TT_RPAREN, null, this.position));
         this.advance();
       } else {
         throw new IllegalCharError(
@@ -155,6 +158,8 @@ class Lexer {
         );
       }
     }
+
+    tokens.push(new Token(TT_EOF, null, this.position));
 
     return tokens;
   }
@@ -180,9 +185,9 @@ class Lexer {
     }
 
     if (hasDot) {
-      return new Token(TT_FLOAT, parseFloat(numberString));
+      return new Token(TT_FLOAT, parseFloat(numberString), this.position);
     } else {
-      return new Token(TT_INT, parseInt(numberString));
+      return new Token(TT_INT, parseInt(numberString), this.position);
     }
   }
 }
@@ -218,15 +223,49 @@ class BinaryOperationNode {
   }
 }
 
+class UnaryOperationNode {
+  constructor(operatorToken, node) {
+    this.operatorNode = operatorToken;
+    this.node = node;
+  }
+}
+
+class ParseResult {
+  constructor() {
+    this.error = null;
+    this.node = null;
+  }
+
+  register(parseResult) {
+    if (parseResult instanceof ParseResult) {
+      if (parseResult.error != null) this.error = parseResult.error;
+      return parseResult.node;
+    }
+    return parseResult;
+  }
+
+  success(node) {
+    this.node = node;
+    return this;
+  }
+
+  failure(error) {
+    this.error = error;
+    return this;
+  }
+}
+
 /**
  * A parser that can generate an abstract syntax tree from a list of tokens
  */
 class Parser {
   /**
-   *
+   * Construct a parser.
+   * @param {fileName} fileName A file name
    * @param {Token[]} tokens A list of tokens
    */
-  constructor(tokens) {
+  constructor(fileName, tokens) {
+    this.fileName = fileName;
     this.tokens = tokens;
     this.tokenIndex = 0;
     this.currentToken = tokens[0];
@@ -246,8 +285,16 @@ class Parser {
    * Parse the expression
    */
   parse() {
-    const result = this.expression();
-    return result;
+    const parseResult = this.expression();
+    if (this.currentToken.type != TT_EOF)
+      //return parseResult.failure(
+      throw new InvalidSyntaxError(
+        "Expected '+', '-', '*', or '/'",
+        this.fileName,
+        this.currentToken.position.lineNumber
+      );
+    // );
+    return parseResult;
   }
 
   /**
@@ -255,11 +302,35 @@ class Parser {
    * @returns {NumberNode|null} - The number node or null
    */
   factor() {
-    if ([TT_INT, TT_FLOAT].includes(this.currentToken.type)) {
-      const token = this.currentToken;
-      this.advance();
-      return new NumberNode(token);
+    const parseResult = new ParseResult();
+    const token = this.currentToken;
+
+    if ([TT_ADD, TT_SUBTRACT].includes(token.type)) {
+      parseResult.register(this.advance());
+      const factor = parseResult.register(this.factor());
+      return parseResult.success(new UnaryOperationNode(token, factor));
+    } else if ([TT_INT, TT_FLOAT].includes(token.type)) {
+      parseResult.register(this.advance());
+      return parseResult.success(new NumberNode(token));
+    } else if (token.type == TT_LPAREN) {
+      parseResult.register(this.advance());
+      const expression = parseResult.register(this.expression());
+      if (this.currentToken.type == TT_RPAREN) {
+        parseResult.register(this.advance());
+        return parseResult.success(expression);
+      } else
+        throw new InvalidSyntaxError(
+          "Expected ')'",
+          this.fileName,
+          token.position.lineNumber
+        );
     }
+
+    throw new InvalidSyntaxError(
+      'Expected int or float',
+      this.fileName,
+      token.position.lineNumber
+    );
   }
 
   /**
@@ -284,16 +355,24 @@ class Parser {
    * @param {String[]} operatorTypes - Allowed operator types for the operation
    */
   binaryOperation(shouldFactor, operatorTypes) {
-    let left = shouldFactor ? this.factor() : this.term();
+    const parseResult = new ParseResult();
+    let left = shouldFactor
+      ? parseResult.register(this.factor())
+      : parseResult.register(this.term());
+
+    if (parseResult.error != null) return parseResult;
 
     while (operatorTypes.includes(this.currentToken.type)) {
       const operatorNode = this.currentToken;
-      this.advance();
-      const right = shouldFactor ? this.factor() : this.term();
+      parseResult.register(this.advance());
+      const right = shouldFactor
+        ? parseResult.register(this.factor())
+        : parseResult.register(this.term());
+      if (parseResult.error != null) return parseResult;
       left = new BinaryOperationNode(left, right, operatorNode);
     }
 
-    return left;
+    return parseResult.success(left);
   }
 }
 
@@ -311,8 +390,10 @@ exports.run = (input, fileName) => {
   const tokens = lexer.makeTokens();
 
   // Generate abstract syntax tree
-  const parser = new Parser(tokens);
+  const parser = new Parser(fileName, tokens);
   const ast = parser.parse();
 
-  return ast;
+  return ast.node;
 };
+
+this.run('-4', 'this.run.debug');
