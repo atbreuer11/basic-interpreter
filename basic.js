@@ -193,64 +193,90 @@ class Lexer {
 }
 
 /**
- * A node representing a number token
+ * A generic node
  */
-class NumberNode {
+class Node {}
+
+/**
+ * A node representing a number token
+ * @extends Node
+ */
+class NumberNode extends Node {
   /**
    * Construct a number node.
    * @param {Token} token - The token of type TT_INT or TT_FLOAT
    */
   constructor(token) {
+    super();
     this.token = token;
   }
 }
 
 /**
  * A node representing a binary operation
+ * @extends Node
  */
-class BinaryOperationNode {
+class BinaryOperationNode extends Node {
   /**
-   *
-   * @param {NumberNode} leftNode - The left node
-   * @param {NumberNode} rightNode - The right node
+   * Construct a binary operation node
+   * @param {Node} leftNode - The left node
+   * @param {Node} rightNode - The right node
    * @param {Token} operatorToken - A binary operator token of type TT_ADD,
    *    TT_SUBTRACT, TT_MULTIPLY, or TT_DIVIDE
    */
   constructor(leftNode, rightNode, operatorToken) {
+    super();
     this.leftNode = leftNode;
     this.rightNode = rightNode;
     this.operatorToken = operatorToken;
   }
 }
 
-class UnaryOperationNode {
+/**
+ * A node representing a unary operation
+ * @extends Node
+ */
+class UnaryOperationNode extends Node {
+  /**
+   * Construct a unary operation node
+   * @param {Token} operatorToken
+   * @param {Node} node
+   */
   constructor(operatorToken, node) {
-    this.operatorNode = operatorToken;
+    super();
+    this.operatorToken = operatorToken;
     this.node = node;
   }
 }
 
+/**
+ * A parse result that can contain a node and/or an error
+ */
 class ParseResult {
+  /**
+   * Construct a parse result.
+   */
   constructor() {
-    this.error = null;
     this.node = null;
   }
 
-  register(parseResult) {
-    if (parseResult instanceof ParseResult) {
-      if (parseResult.error != null) this.error = parseResult.error;
-      return parseResult.node;
+  /**
+   * Register a result
+   * @param {ParseResult|Node} result A result
+   */
+  register(result) {
+    if (result instanceof ParseResult) {
+      return result.node;
     }
-    return parseResult;
+    return result;
   }
 
+  /**
+   * Call to register a successful parse result
+   * @param {Node} node
+   */
   success(node) {
     this.node = node;
-    return this;
-  }
-
-  failure(error) {
-    this.error = error;
     return this;
   }
 }
@@ -279,6 +305,7 @@ class Parser {
     this.tokenIndex++;
     if (this.tokenIndex < this.tokens.length)
       this.currentToken = this.tokens[this.tokenIndex];
+    return this.currentToken;
   }
 
   /**
@@ -287,13 +314,11 @@ class Parser {
   parse() {
     const parseResult = this.expression();
     if (this.currentToken.type != TT_EOF)
-      //return parseResult.failure(
       throw new InvalidSyntaxError(
         "Expected '+', '-', '*', or '/'",
         this.fileName,
         this.currentToken.position.lineNumber
       );
-    // );
     return parseResult;
   }
 
@@ -360,15 +385,12 @@ class Parser {
       ? parseResult.register(this.factor())
       : parseResult.register(this.term());
 
-    if (parseResult.error != null) return parseResult;
-
     while (operatorTypes.includes(this.currentToken.type)) {
       const operatorNode = this.currentToken;
       parseResult.register(this.advance());
       const right = shouldFactor
         ? parseResult.register(this.factor())
         : parseResult.register(this.term());
-      if (parseResult.error != null) return parseResult;
       left = new BinaryOperationNode(left, right, operatorNode);
     }
 
@@ -395,5 +417,3 @@ exports.run = (input, fileName) => {
 
   return ast.node;
 };
-
-this.run('-4', 'this.run.debug');
