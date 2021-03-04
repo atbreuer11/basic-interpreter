@@ -4,7 +4,7 @@
  */
 class IllegalCharError extends Error {
   /**
-   * Construct an error.
+   * Construct an error
    * @param {String} char - The illegal character
    * @param {String} fileName - The file name
    * @param {Number} lineNumber - The line number
@@ -34,7 +34,7 @@ class InvalidSyntaxError extends Error {
  */
 class Position {
   /**
-   * Construct a position.
+   * Construct a position
    * @param {Number} index - An index relative to the start position
    * @param {Number} lineNumber - An index of the current line number
    * @param {Number} column - An index of the current column in the line
@@ -78,7 +78,7 @@ const TT_EOF = 'TT_EOF';
  */
 class Token {
   /**
-   * Construct a token.
+   * Construct a token
    * @param {String} type - A type of token prefixed by TT_
    * @param {Number|null} value - A potential value for the token
    * @param {Position} position - The position of the token
@@ -110,7 +110,7 @@ class Lexer {
 
   /**
    * Advance the position, setting the current char to null when the end of
-   * the input is reached.
+   * the input is reached
    */
   advance() {
     this.position.advance(this.currentChar);
@@ -121,7 +121,7 @@ class Lexer {
 
   /**
    * Make the list of tokens from the input, returns an array that can be
-   * destructured.
+   * destructured
    * @throws
    * @return {Token[]} - The list of tokens
    */
@@ -165,7 +165,7 @@ class Lexer {
   }
 
   /**
-   * Make and return an int or a float depending on if a dot is detected.
+   * Make and return an int or a float depending on if a dot is detected
    * @return {Token} - A token of type TT_FLOAT or TT_INT
    */
   makeNumber() {
@@ -203,7 +203,7 @@ class Node {}
  */
 class NumberNode extends Node {
   /**
-   * Construct a number node.
+   * Construct a number node
    * @param {Token} token - The token of type TT_INT or TT_FLOAT
    */
   constructor(token) {
@@ -254,7 +254,7 @@ class UnaryOperationNode extends Node {
  */
 class ParseResult {
   /**
-   * Construct a parse result.
+   * Construct a parse result
    */
   constructor() {
     this.node = null;
@@ -286,7 +286,7 @@ class ParseResult {
  */
 class Parser {
   /**
-   * Construct a parser.
+   * Construct a parser
    * @param {fileName} fileName A file name
    * @param {Token[]} tokens A list of tokens
    */
@@ -299,7 +299,7 @@ class Parser {
 
   /**
    * Advance the position, setting the current char to null when the end of
-   * the input is reached.
+   * the input is reached
    */
   advance() {
     this.tokenIndex++;
@@ -398,8 +398,106 @@ class Parser {
   }
 }
 
+class NumberValue {
+  constructor(value) {
+    this.value = value;
+    this.setPosition();
+  }
+
+  setPosition(position) {
+    this.position = position;
+    return this;
+  }
+
+  addedTo(other) {
+    if (other instanceof NumberValue)
+      return new NumberValue(this.value + other.value);
+  }
+
+  subractedBy(other) {
+    if (other instanceof NumberValue)
+      return new NumberValue(this.value - other.value);
+  }
+
+  multipliedBy(other) {
+    if (other instanceof NumberValue)
+      return new NumberValue(this.value * other.value);
+  }
+
+  dividedBy(other) {
+    if (other instanceof NumberValue)
+      return new NumberValue(this.value / other.value);
+  }
+}
+
 /**
- * Run the lexer on the input. Returns an array that can be destructured.
+ * An interpreter to traverse the AST and determine how to
+ * execute it
+ */
+class Interpreter {
+  /**
+   * The starting point for the traversal of the AST
+   * @param {Node} node
+   */
+  visit(node) {
+    const visitMethodString = `visit${node.constructor.name}`;
+    const visitNode = this[visitMethodString].bind(this);
+    return visitNode(node);
+  }
+
+  /**
+   * Visit a number node
+   * @param {NumberNode} node
+   */
+  visitNumberNode(node) {
+    const number = new NumberValue(node.token.value);
+    return number.setPosition(node.token.position);
+  }
+
+  /**
+   * Visit a binary operation node
+   * @param {BinaryOperationNode} node
+   */
+  visitBinaryOperationNode(node) {
+    const left = this.visit(node.leftNode);
+    const right = this.visit(node.rightNode);
+    let result = null;
+
+    switch (node.operatorToken.type) {
+      case TT_ADD:
+        result = left.addedTo(right);
+        break;
+      case TT_SUBTRACT:
+        result = left.subractedBy(right);
+        break;
+      case TT_MULTIPLY:
+        result = left.multipliedBy(right);
+        break;
+      case TT_DIVIDE:
+        result = left.dividedBy(right);
+        break;
+    }
+
+    return result.setPosition(node.operatorToken.position);
+  }
+
+  /**
+   * Visit a unary operation node
+   * @param {UnaryOperationNode} node
+   */
+  visitUnaryOperationNode(node) {
+    let number = this.visit(node.node);
+
+    if (node.operatorToken.type == TT_SUBTRACT) {
+      number = number.multipliedBy(new NumberValue(-1));
+    }
+
+    return number.setPosition(node.operatorToken.position);
+  }
+}
+
+/**
+ * Run the lexer on the input. Returns an array that can be destructured
  * @throws
  * @param {String} input - An input
  * @param {String} fileName - A file name
@@ -411,9 +509,13 @@ exports.run = (input, fileName) => {
   const lexer = new Lexer(fileName, input);
   const tokens = lexer.makeTokens();
 
-  // Generate abstract syntax tree
+  // Parse the lexed tokens the AST
   const parser = new Parser(fileName, tokens);
   const ast = parser.parse();
 
-  return ast.node;
+  // Interpret the AST
+  const interpreter = new Interpreter();
+  const result = interpreter.visit(ast.node);
+
+  return result;
 };
