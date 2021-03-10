@@ -22,6 +22,7 @@ exports.run = (input, fileName) => {
   // Interpret the AST
   const interpreter = new Interpreter();
   const result = interpreter.visit(ast.node);
+  const value = result.value;
 
-  return result;
+  return value;
 };
